@@ -22,10 +22,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install customtkinter pandas openpyxl requests tqdm pyinstaller
 
       - name: Build EXE with PyInstaller
-        # Tambahan: --noconfirm (menimpa folder build lama), --collect-all dan --hidden-import agar aset UI ikut terbawa
         run: |
           pyinstaller --noconfirm --onefile --noconsole --collect-all customtkinter --hidden-import customtkinter main.py
 
