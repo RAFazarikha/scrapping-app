@@ -5,6 +5,8 @@ Multi-Platform Auto-Scraper for YouTube, TikTok, and Instagram (Indonesia) - GUI
 import sys
 import os
 import threading
+import platform
+import subprocess
 import customtkinter as ctk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -98,6 +100,16 @@ class ScraperApp(ctk.CTk):
         self.start_btn = ctk.CTkButton(self.main_frame, text="🚀 Mulai Scraping", command=self.start_scraping_thread)
         self.start_btn.pack(fill="x", padx=20, pady=10)
 
+        # Tombol Buka Folder Hasil (TAMBAHKAN KODE INI)
+        self.open_folder_btn = ctk.CTkButton(
+            self.main_frame,
+            text="📁 Buka Folder Hasil",
+            command=self.open_export_folder,
+            fg_color="#2b7a4b", # Warna hijau agar berbeda dengan tombol mulai
+            hover_color="#1e5434"
+        )
+        self.open_folder_btn.pack(fill="x", padx=20, pady=(0, 10))
+
         # Log Output (TextBox)
         self.log_box = ctk.CTkTextbox(self.main_frame, height=200, state="normal")
         self.log_box.pack(fill="both", padx=20, pady=(10, 20), expand=True)
@@ -111,6 +123,27 @@ class ScraperApp(ctk.CTk):
             self.custom_category_entry.pack(fill="x", pady=(10, 0))
         else:
             self.custom_category_entry.pack_forget()
+
+    def open_export_folder(self):
+        """Membuka folder 'exports' di file manager bawaan OS."""
+        # Menentukan path folder exports
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        export_path = os.path.join(base_dir, "exports")
+
+        # Jika folder belum ada (karena belum pernah scrape), buat foldernya
+        if not os.path.exists(export_path):
+            os.makedirs(export_path)
+
+        # Buka folder sesuai Sistem Operasi
+        try:
+            if platform.system() == "Windows":
+                os.startfile(export_path)
+            elif platform.system() == "Darwin": # macOS
+                subprocess.Popen(["open", export_path])
+            else: # Linux (termasuk Arch/CachyOS)
+                subprocess.Popen(["xdg-open", export_path])
+        except Exception as e:
+            print(f"❌ Gagal membuka folder: {e}")
 
     def start_scraping_thread(self):
         """Menjalankan fungsi utama di thread terpisah agar GUI tidak hang."""
@@ -144,6 +177,7 @@ class ScraperApp(ctk.CTk):
             else:
                 selected_categories = [cat_choice]
 
+            # ❌ HAPUS DUA BARIS DI BAWAH INI KARENA AKAN MERUSAK LOGIKA INPUT CUSTOM:
             cat_choice = self.category_var.get()
             selected_categories = list(NICHES.keys()) if cat_choice == "Semua Kategori" else [cat_choice]
 

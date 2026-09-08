@@ -13,6 +13,9 @@ from typing import Dict, List, Optional, Any, Set, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from tqdm import tqdm
+import random
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -32,7 +35,7 @@ def parse_number_with_suffix(text: str) -> int:
     """
     if not text:
         return 0
-    
+
     clean = text.lower().strip()
     clean = re.sub(r'(subscribers?|subscriber|pengikut|penayangan|views?|video|ditonton|x\s*ditonton)', '', clean).strip()
     clean = clean.replace('\xa0', ' ').replace(',', '.')
@@ -55,7 +58,7 @@ def parse_number_with_suffix(text: str) -> int:
             return int(val * multiplier)
     except Exception:
         pass
-    
+
     return 0
 
 
@@ -65,9 +68,35 @@ class YouTubeScraper:
         self.db = DatabaseManager()
 
     def _get_session(self) -> requests.Session:
-        s = requests.Session()
-        s.headers.update(DEFAULT_HEADERS)
-        return s
+        session = requests.Session()
+
+        # Daftar User-Agent modern untuk dirotasi
+        user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0"
+        ]
+
+        # Konfigurasi ulang header
+        headers = {
+            "User-Agent": random.choice(user_agents), # Rotasi UA
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8",
+        }
+        session.headers.update(headers)
+
+        # Mekanisme Backoff (Jeda yang bertambah secara eksponensial saat gagal)
+        retries = Retry(
+            total=3,  # Maksimal coba lagi 3 kali
+            backoff_factor=2,  # Waktu tunggu: 2s, 4s, 8s
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET"]
+        )
+        adapter = HTTPAdapter(max_retries=retries)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+
+        return session
 
     def scrape_channel_direct(self, target: str, category: str = "", keyword: str = "") -> Optional[Dict[str, Any]]:
         """
@@ -87,7 +116,7 @@ class YouTubeScraper:
                 handle = target if target.startswith("@") else f"@{target}"
                 url = f"https://www.youtube.com/{handle}/videos"
 
-            resp = session.get(url, timeout=10)
+            resp = session.get(url, timeout=(5, 15))
             if resp.status_code != 200:
                 return None
 
@@ -104,7 +133,7 @@ class YouTubeScraper:
             # 1. Metadata Extraction
             meta = data.get("metadata", {}).get("channelMetadataRenderer", {})
             header = data.get("header", {})
-            
+
             channel_id = meta.get("externalId", "")
             if not channel_id:
                 cid_match = re.search(r'"channelId":"(UC[a-zA-Z0-9_-]{22})"', html)
@@ -116,7 +145,7 @@ class YouTubeScraper:
 
             channel_title = meta.get("title", "")
             description = meta.get("description", "")
-            
+
             avatar_url = ""
             avatars = meta.get("avatar", {}).get("thumbnails", [])
             if avatars:
@@ -132,11 +161,11 @@ class YouTubeScraper:
 
             phr = header.get("pageHeaderRenderer", {})
             vm = phr.get("content", {}).get("pageHeaderViewModel", {})
-            
+
             if vm:
                 if not channel_title:
                     channel_title = vm.get("title", {}).get("dynamicTextViewModel", {}).get("text", {}).get("content", "")
-                
+
                 meta_rows = vm.get("metadata", {}).get("contentMetadataViewModel", {}).get("metadataRows", [])
                 for r in meta_rows:
                     parts = [p.get("text", {}).get("content", "") for p in r.get("metadataParts", [])]
@@ -182,9 +211,9 @@ class YouTubeScraper:
                     for item in contents:
                         if len(recent_views) >= MAX_RECENT_VIDEOS_ANALYSIS:
                             break
-                        
+
                         rir = item.get("richItemRenderer", {}).get("content", {})
-                        
+
                         if "lockupViewModel" in rir:
                             lvm = rir["lockupViewModel"]
                             meta_vm = lvm.get("metadata", {}).get("lockupMetadataViewModel", {})
@@ -358,19 +387,25 @@ class YouTubeScraper:
         # 2. Fast Parallel Channel Extraction with Live Progress Bar
         candidates_target = candidates_to_process[:target_count]
         pbar_scrape = tqdm(total=len(candidates_target), desc=f"[2/2] Scraping {category_name}")
-        
+
         email_count = 0
         wa_count = 0
 
         with ThreadPoolExecutor(max_workers=max_threads) as executor:
-            future_to_cand = {
-                executor.submit(
+            # Ganti blok future_to_cand = { ... } dengan ini:
+            future_to_cand = {}
+            for cid, chandle, kw in candidates_target:
+                # Jeda acak 0.5 hingga 2.5 detik untuk menghindari blokir IP YouTube
+                time.sleep(random.uniform(0.5, 2.5))
+
+                target_handle = chandle.lstrip('/') if chandle else cid
+                future = executor.submit(
                     self.scrape_channel_direct,
-                    chandle.lstrip('/') if chandle else cid,
+                    target_handle,
                     category_name,
                     kw
-                ): (cid, chandle) for cid, chandle, kw in candidates_target
-            }
+                )
+                future_to_cand[future] = (cid, chandle)
 
             for future in as_completed(future_to_cand):
                 try:
@@ -382,8 +417,9 @@ class YouTubeScraper:
                             email_count += 1
                         if data.get("phone_numbers"):
                             wa_count += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Log error untuk evaluasi, jangan ditelan mentah-mentah
+                    print(f"⚠️ Gagal scrape {data}: {str(e)}")
 
                 pbar_scrape.set_postfix({"Emails": email_count, "WA": wa_count, "Tersimpan": len(scraped_results)})
                 pbar_scrape.update(1)

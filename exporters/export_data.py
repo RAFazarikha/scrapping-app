@@ -1,12 +1,13 @@
 """
 Exporter Module for Multi-Platform Influencer & Afiliator Database (YouTube, TikTok, Instagram).
-Formats export filenames strictly as: <platform>_<kategori>.xlsx (e.g. youtube_kosmetik.xlsx, tiktok_makanan.xlsx).
+Formats export filenames strictly as: <Platform>_<Kategori>_ddMMMyyyy.xlsx (e.g. Youtube_Kosmetik_08Sep2026.xlsx).
 Includes Creator Type, Tier Influencer (Mega/Macro/Micro/Nano), and Affiliate Shop Links in columns.
 """
 
 import os
 import re
 import json
+from datetime import datetime
 from typing import Optional, Dict, Any, List
 import pandas as pd
 from database.db_manager import DatabaseManager
@@ -17,7 +18,7 @@ def clean_category_slug(category: Optional[str]) -> str:
     """Converts category names like 'Kosmetik & Skincare' into clean slug 'kosmetik'."""
     if not category or category.lower() in ["all", "semua", ""]:
         return "all"
-    
+
     cat_lower = category.lower()
     if "kosmetik" in cat_lower or "beauty" in cat_lower or "skincare" in cat_lower:
         return "kosmetik"
@@ -27,17 +28,21 @@ def clean_category_slug(category: Optional[str]) -> str:
         return "fashion"
     elif "gadget" in cat_lower or "tech" in cat_lower or "teknologi" in cat_lower:
         return "gadget"
-    
+
     clean = re.sub(r'[^a-zA-Z0-9]', '_', cat_lower)
     return re.sub(r'_+', '_', clean).strip('_')
 
 
 def generate_filename(platform: Optional[str], category: Optional[str], ext: str = "xlsx", has_email_only: bool = False) -> str:
-    """Generates standard filename: <platform>_<kategori>.xlsx (e.g. youtube_kosmetik.xlsx)."""
-    plat = (platform.lower().strip() if platform else "all")
-    cat = clean_category_slug(category)
+    """Generates standard filename: <Platform>_<Kategori>_ddMMMyyyy.<ext> (e.g. Youtube_Kosmetik_08Sep2026.xlsx)."""
+    plat = platform.capitalize() if platform and platform.lower() != "all" else "All"
+    cat = clean_category_slug(category).capitalize()
     email_suffix = "_with_email" if has_email_only else ""
-    return f"{plat}_{cat}{email_suffix}.{ext}"
+
+    # Membuat format tanggal ddMMMyyyy (contoh: 08Sep2026)
+    date_str = datetime.now().strftime("%d%b%Y")
+
+    return f"{plat}_{cat}{email_suffix}_{date_str}.{ext}"
 
 
 def export_to_excel(
@@ -50,8 +55,7 @@ def export_to_excel(
     filename: Optional[str] = None
 ) -> str:
     """
-    Exports influencers & afiliators to Excel (.xlsx) file with standard name: <platform>_<kategori>.xlsx
-    Example: youtube_kosmetik.xlsx, tiktok_makanan.xlsx, instagram_fashion.xlsx
+    Exports influencers & afiliators to Excel (.xlsx) file with standard name: <Platform>_<Kategori>_ddMMMyyyy.xlsx
     """
     db = DatabaseManager()
     data = db.get_all_influencers(
@@ -62,7 +66,7 @@ def export_to_excel(
         tier=tier,
         min_followers=min_followers
     )
-    
+
     if not data:
         return ""
 
@@ -108,10 +112,10 @@ def export_to_excel(
         filename = generate_filename(platform, category, ext="xlsx", has_email_only=has_email_only)
 
     output_path = os.path.join(EXPORTS_DIR, filename)
-    
+
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name="Influencer_Afiliator", index=False)
-        
+
     return output_path
 
 
@@ -124,7 +128,7 @@ def export_to_csv(
     min_followers: int = 0,
     filename: Optional[str] = None
 ) -> str:
-    """Exports influencers & afiliators to CSV file (<platform>_<kategori>.csv)."""
+    """Exports influencers & afiliators to CSV file."""
     db = DatabaseManager()
     data = db.get_all_influencers(
         platform=platform,
@@ -134,12 +138,12 @@ def export_to_csv(
         tier=tier,
         min_followers=min_followers
     )
-    
+
     if not data:
         return ""
 
     df = pd.DataFrame(data)
-    
+
     priority_cols = [
         "platform", "creator_type", "tier", "channel_title", "handle", "category",
         "city", "estimated_rate_card", "subscribers", "subscribers_formatted",
@@ -178,7 +182,7 @@ def export_to_json(
         tier=tier,
         min_followers=min_followers
     )
-    
+
     if not data:
         return ""
 
@@ -198,11 +202,7 @@ def export_to_majapahit_laravel(
 ) -> Dict[str, str]:
     """
     Exports scraped KOL data into MySQL SQL and JSON Seeder
-    directly compatible with Laravel 'Majapahit' Agency Database Schema:
-    - users (role: kol)
-    - kol_profiles (nickname, bio, city, tier, status)
-    - kol_social_media (platform, username, url, followers, er)
-    - kol_rate_cards (platform, content_type, rate)
+    directly compatible with Laravel 'Majapahit' Agency Database Schema.
     """
     import json
     from parsers.contact_parser import estimate_rate_card
@@ -281,7 +281,7 @@ def export_to_majapahit_laravel(
         sql_statements.append(f"INSERT INTO users (id, name, email, password, is_active, created_at, updated_at) VALUES ({user_id}, '{safe_name}', '{safe_email}', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 1, NOW(), NOW()) ON DUPLICATE KEY UPDATE name=VALUES(name);")
         sql_statements.append(f"INSERT INTO kol_profiles (user_id, nickname, bio, city, tier_id, status, joined_at, created_at, updated_at) VALUES ({user_id}, '{safe_name[:50]}', '{safe_bio_sql}', '{city}', {tier_id}, 'aktif', NOW(), NOW(), NOW()) ON DUPLICATE KEY UPDATE city=VALUES(city);")
         sql_statements.append(f"INSERT INTO kol_social_media (kol_profile_id, platform, username, profile_url, followers_count, engagement_rate, created_at, updated_at) VALUES ({user_id}, '{plat}', '{handle}', '{profile_url}', {followers}, {er}, NOW(), NOW());")
-        
+
         for ctype, price in rates_detail.items():
             if isinstance(price, (int, float)):
                 sql_statements.append(f"INSERT INTO kol_rate_cards (kol_profile_id, platform, content_type, rate, created_at, updated_at) VALUES ({user_id}, '{plat}', '{ctype}', {price}, NOW(), NOW());")
@@ -289,9 +289,10 @@ def export_to_majapahit_laravel(
 
     sql_statements.append("SET FOREIGN_KEY_CHECKS=1;")
 
-    # Save files
-    json_path = os.path.join(EXPORTS_DIR, "majapahit_kol_seed.json")
-    sql_path = os.path.join(EXPORTS_DIR, "majapahit_kol_seed.sql")
+    # Save files with date format
+    date_str = datetime.now().strftime("%d%b%Y")
+    json_path = os.path.join(EXPORTS_DIR, f"majapahit_kol_seed_{date_str}.json")
+    sql_path = os.path.join(EXPORTS_DIR, f"majapahit_kol_seed_{date_str}.sql")
 
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(json_records, f, ensure_ascii=False, indent=2)

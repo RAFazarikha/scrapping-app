@@ -13,6 +13,9 @@ from typing import Dict, List, Optional, Any, Set
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from tqdm import tqdm
+import random
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -74,9 +77,35 @@ class TikTokScraper:
         self.session = self._get_session()
 
     def _get_session(self) -> requests.Session:
-        s = requests.Session()
-        s.headers.update(TIKTOK_MOBILE_HEADERS)
-        return s
+        session = requests.Session()
+
+        # Daftar User-Agent modern untuk dirotasi
+        user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0"
+        ]
+
+        # Konfigurasi ulang header
+        headers = {
+            "User-Agent": random.choice(user_agents), # Rotasi UA
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8",
+        }
+        session.headers.update(headers)
+
+        # Mekanisme Backoff (Jeda yang bertambah secara eksponensial saat gagal)
+        retries = Retry(
+            total=3,  # Maksimal coba lagi 3 kali
+            backoff_factor=2,  # Waktu tunggu: 2s, 4s, 8s
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET"]
+        )
+        adapter = HTTPAdapter(max_retries=retries)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+
+        return session
 
     def scrape_creator(self, username: str, category: str = "", keyword: str = "") -> Optional[Dict[str, Any]]:
         """Scrapes a single TikTok profile and extracts stats, bio, and business contacts."""
@@ -85,7 +114,7 @@ class TikTokScraper:
             clean_username = username.strip().lstrip('@').replace('https://www.tiktok.com/@', '').rstrip('/')
             url = f"https://www.tiktok.com/@{clean_username}"
 
-            resp = session.get(url, timeout=10)
+            resp = session.get(url, timeout=(5, 15))
             if resp.status_code != 200:
                 return None
 
@@ -178,7 +207,7 @@ class TikTokScraper:
         """
         seeds = TIKTOK_NICHE_SEEDS.get(category_name, [])
         discovered_pool = self.db.get_unscraped_handles("tiktok", category=category_name, limit=5000)
-        
+
         all_candidates = []
         seen = set()
         for h in seeds + discovered_pool:
@@ -196,7 +225,7 @@ class TikTokScraper:
         print(f"============================================================")
 
         pbar = tqdm(total=target_count, desc=f"Scraping TikTok {category_name}")
-        
+
         email_count = 0
         wa_count = 0
 
@@ -207,10 +236,13 @@ class TikTokScraper:
                     break
 
                 batch = all_candidates[i:i + batch_size]
-                future_to_username = {
-                    executor.submit(self.scrape_creator, u, category_name): u
-                    for u in batch
-                }
+                # Ganti blok future_to_username = { ... } dengan ini:
+                future_to_username = {}
+                for u in batch:
+                    # Jeda acak 0.5 hingga 2.5 detik untuk menghindari rate-limit
+                    time.sleep(random.uniform(0.5, 2.5))
+                    future = executor.submit(self.scrape_creator, u, category_name)
+                    future_to_username[future] = u
 
                 for future in as_completed(future_to_username):
                     u = future_to_username[future]
@@ -227,8 +259,9 @@ class TikTokScraper:
                             pbar.update(1)
                             if len(scraped_results) >= target_count:
                                 break
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        # Log error untuk evaluasi, jangan ditelan mentah-mentah
+                        print(f"⚠️ Gagal scrape {u}: {str(e)}")
 
                     pbar.set_postfix({"Emails": email_count, "WA": wa_count, "Tersimpan": len(scraped_results)})
 
