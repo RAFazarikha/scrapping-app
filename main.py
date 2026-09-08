@@ -117,6 +117,9 @@ class ScraperApp(ctk.CTk):
         # Redirect stdout (print) ke TextBox
         sys.stdout = PrintRedirector(self.log_box)
 
+        # TAMBAHKAN BARIS INI agar semua error sistem masuk ke TextBox
+        sys.stderr = PrintRedirector(self.log_box)
+
     def toggle_custom_category(self, choice):
         """Menampilkan atau menyembunyikan input teks kategori."""
         if choice == "Lainnya":
