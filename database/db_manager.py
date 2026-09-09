@@ -259,106 +259,82 @@ class DatabaseManager:
             conn.commit()
 
     def save_influencer(self, data: Dict[str, Any]) -> bool:
-        """
-        Saves or updates influencer / afiliator record.
-        Returns True if newly inserted, False if updated.
+        """Insert or update an influencer record, never creating duplicates.
+        Returns True if a new row was inserted, False if an existing row was updated.
         """
         if not data.get("channel_id"):
             return False
-
-        if not data.get("platform"):
-            data["platform"] = "youtube"
-
-        if not data.get("creator_type"):
-            data["creator_type"] = "Influencer & Afiliator"
-
+        data.setdefault("platform", "youtube")
+        data.setdefault("creator_type", "Influencer & Afiliator")
         subs = int(data.get("subscribers", 0) or 0)
-        if not data.get("tier") or data.get("tier") in ["Nano (1K-10K)", "Micro (10K-100K)", "Mid-Tier (100K-500K)", "Macro (500K-1M)", "Mega (>1M)"]:
-            from parsers.contact_parser import get_influencer_tier, estimate_rate_card, extract_city
+        if not data.get("tier") or data["tier"] in ["Nano (1K-10K)", "Micro (10K-100K)", "Mid-Tier (100K-500K)", "Macro (500K-1M)", "Mega (>1M)"]:
+            from parsers.contact_parser import get_influencer_tier
             data["tier"] = get_influencer_tier(subs)
-
         from parsers.contact_parser import estimate_rate_card, extract_city
-        if not data.get("city") or data.get("city") == "Indonesia":
+        if not data.get("city") or data["city"] == "Indonesia":
             data["city"] = extract_city(data.get("description", ""))
-
         if not data.get("estimated_rate_card"):
             rate_info = estimate_rate_card(data["platform"], subs, data["tier"])
             data["estimated_rate_card"] = rate_info["estimated_rate_range"]
-
-        if "affiliate_links" not in data:
-            data["affiliate_links"] = ""
-
-        # Auto-register discovered IG and TikTok handles to pool
+        data.setdefault("affiliate_links", "")
         cat = data.get("category", "")
         if data.get("instagram_handle"):
             self.add_discovered_handle("instagram", data["instagram_handle"], cat, data["platform"])
         if data.get("tiktok_handle"):
             self.add_discovered_handle("tiktok", data["tiktok_handle"], cat, data["platform"])
-
+        # Upsert using SQLite ON CONFLICT clause – one statement, no pre‑select.
+        upsert_sql = """
+            INSERT INTO influencers (
+                platform, channel_id, channel_title, handle, custom_url,
+                creator_type, tier, city, estimated_rate_card, subscribers,
+                subscribers_formatted, total_videos, total_views,
+                avg_recent_views, avg_recent_likes, avg_recent_comments,
+                engagement_rate, category, search_keyword, country,
+                description, emails, phone_numbers, instagram_handle,
+                tiktok_handle, bio_links, affiliate_links, avatar_url, created_at, updated_at
+            ) VALUES (
+                :platform, :channel_id, :channel_title, :handle, :custom_url,
+                :creator_type, :tier, :city, :estimated_rate_card, :subscribers,
+                :subscribers_formatted, :total_videos, :total_views,
+                :avg_recent_views, :avg_recent_likes, :avg_recent_comments,
+                :engagement_rate, :category, :search_keyword, :country,
+                :description, :emails, :phone_numbers, :instagram_handle,
+                :tiktok_handle, :bio_links, :affiliate_links, :avatar_url,
+                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            )
+            ON CONFLICT(platform, channel_id) DO UPDATE SET
+                channel_title = COALESCE(:channel_title, channel_title),
+                handle = COALESCE(:handle, handle),
+                custom_url = COALESCE(:custom_url, custom_url),
+                creator_type = COALESCE(:creator_type, creator_type),
+                tier = COALESCE(:tier, tier),
+                city = COALESCE(:city, city),
+                estimated_rate_card = COALESCE(:estimated_rate_card, estimated_rate_card),
+                subscribers = CASE WHEN :subscribers > 0 THEN :subscribers ELSE subscribers END,
+                subscribers_formatted = COALESCE(:subscribers_formatted, subscribers_formatted),
+                total_videos = CASE WHEN :total_videos > 0 THEN :total_videos ELSE total_videos END,
+                total_views = CASE WHEN :total_views > 0 THEN :total_views ELSE total_views END,
+                avg_recent_views = CASE WHEN :avg_recent_views > 0 THEN :avg_recent_views ELSE avg_recent_views END,
+                avg_recent_likes = CASE WHEN :avg_recent_likes > 0 THEN :avg_recent_likes ELSE avg_recent_likes END,
+                avg_recent_comments = CASE WHEN :avg_recent_comments > 0 THEN :avg_recent_comments ELSE avg_recent_comments END,
+                engagement_rate = CASE WHEN :engagement_rate > 0.0 THEN :engagement_rate ELSE engagement_rate END,
+                category = CASE WHEN :category != '' THEN :category ELSE category END,
+                emails = CASE WHEN :emails != '' THEN :emails ELSE emails END,
+                phone_numbers = CASE WHEN :phone_numbers != '' THEN :phone_numbers ELSE phone_numbers END,
+                instagram_handle = CASE WHEN :instagram_handle != '' THEN :instagram_handle ELSE instagram_handle END,
+                tiktok_handle = CASE WHEN :tiktok_handle != '' THEN :tiktok_handle ELSE tiktok_handle END,
+                bio_links = CASE WHEN :bio_links != '' THEN :bio_links ELSE bio_links END,
+                affiliate_links = CASE WHEN :affiliate_links != '' THEN :affiliate_links ELSE affiliate_links END,
+                avatar_url = COALESCE(:avatar_url, avatar_url),
+                updated_at = CURRENT_TIMESTAMP;
+        """
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            
-            cursor.execute(
-                "SELECT id FROM influencers WHERE platform = ? AND (channel_id = ? OR handle = ?)",
-                (data["platform"], data["channel_id"], data.get("handle", ""))
-            )
-            existing = cursor.fetchone()
+            cursor.execute(upsert_sql, data)
+            conn.commit()
+            # cursor.rowcount == 1 for insert, >1 for update (SQLite returns 0 for no change)
+            return cursor.rowcount == 1
 
-            if existing:
-                query = """
-                    UPDATE influencers SET
-                        channel_title = COALESCE(:channel_title, channel_title),
-                        handle = COALESCE(:handle, handle),
-                        custom_url = COALESCE(:custom_url, custom_url),
-                        creator_type = COALESCE(:creator_type, creator_type),
-                        tier = COALESCE(:tier, tier),
-                        city = COALESCE(:city, city),
-                        estimated_rate_card = COALESCE(:estimated_rate_card, estimated_rate_card),
-                        subscribers = CASE WHEN :subscribers > 0 THEN :subscribers ELSE subscribers END,
-                        subscribers_formatted = COALESCE(:subscribers_formatted, subscribers_formatted),
-                        total_videos = CASE WHEN :total_videos > 0 THEN :total_videos ELSE total_videos END,
-                        total_views = CASE WHEN :total_views > 0 THEN :total_views ELSE total_views END,
-                        avg_recent_views = CASE WHEN :avg_recent_views > 0 THEN :avg_recent_views ELSE avg_recent_views END,
-                        avg_recent_likes = CASE WHEN :avg_recent_likes > 0 THEN :avg_recent_likes ELSE avg_recent_likes END,
-                        avg_recent_comments = CASE WHEN :avg_recent_comments > 0 THEN :avg_recent_comments ELSE avg_recent_comments END,
-                        engagement_rate = CASE WHEN :engagement_rate > 0.0 THEN :engagement_rate ELSE engagement_rate END,
-                        category = CASE WHEN :category != '' THEN :category ELSE category END,
-                        emails = CASE WHEN :emails != '' THEN :emails ELSE emails END,
-                        phone_numbers = CASE WHEN :phone_numbers != '' THEN :phone_numbers ELSE phone_numbers END,
-                        instagram_handle = CASE WHEN :instagram_handle != '' THEN :instagram_handle ELSE instagram_handle END,
-                        tiktok_handle = CASE WHEN :tiktok_handle != '' THEN :tiktok_handle ELSE tiktok_handle END,
-                        bio_links = CASE WHEN :bio_links != '' THEN :bio_links ELSE bio_links END,
-                        affiliate_links = CASE WHEN :affiliate_links != '' THEN :affiliate_links ELSE affiliate_links END,
-                        avatar_url = COALESCE(:avatar_url, avatar_url),
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE id = :existing_id
-                """
-                data_with_id = dict(data)
-                data_with_id["existing_id"] = existing["id"]
-                cursor.execute(query, data_with_id)
-                conn.commit()
-                return False
-            else:
-                query = """
-                    INSERT INTO influencers (
-                        platform, channel_id, channel_title, handle, custom_url,
-                        creator_type, tier, city, estimated_rate_card, subscribers, subscribers_formatted, total_videos, total_views,
-                        avg_recent_views, avg_recent_likes, avg_recent_comments,
-                        engagement_rate, category, search_keyword, country,
-                        description, emails, phone_numbers, instagram_handle,
-                        tiktok_handle, bio_links, affiliate_links, avatar_url, updated_at
-                    ) VALUES (
-                        :platform, :channel_id, :channel_title, :handle, :custom_url,
-                        :creator_type, :tier, :city, :estimated_rate_card, :subscribers, :subscribers_formatted, :total_videos, :total_views,
-                        :avg_recent_views, :avg_recent_likes, :avg_recent_comments,
-                        :engagement_rate, :category, :search_keyword, :country,
-                        :description, :emails, :phone_numbers, :instagram_handle,
-                        :tiktok_handle, :bio_links, :affiliate_links, :avatar_url, CURRENT_TIMESTAMP
-                    );
-                """
-                cursor.execute(query, data)
-                conn.commit()
-                return True
 
     def get_all_influencers(
         self,
@@ -367,9 +343,11 @@ class DatabaseManager:
         has_email: bool = False,
         creator_type: Optional[str] = None,
         tier: Optional[str] = None,
-        min_followers: int = 0
+        min_followers: int = 0,
+        sort_by: str = "subscribers",
+        reverse: bool = True
     ) -> List[Dict[str, Any]]:
-        """Retrieves influencers & afiliators with optional filtering."""
+        """Retrieves influencers & afiliators with optional filtering and sorting."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             query = "SELECT * FROM influencers WHERE 1=1"
@@ -398,10 +376,16 @@ class DatabaseManager:
             if has_email:
                 query += " AND emails != '' AND emails IS NOT NULL"
 
-            query += " ORDER BY subscribers DESC"
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows]
+        # Dynamic sorting
+        allowed_sorts = {"subscribers", "channel_title", "engagement_rate", "category",
+                         "handle", "tier", "emails", "phone_numbers"}
+        sort_col = sort_by if sort_by in allowed_sorts else "subscribers"
+        direction = "DESC" if reverse else "ASC"
+        query += f" ORDER BY {sort_col} {direction}"
+        
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
 
     def get_stats(self) -> Dict[str, Any]:
         """Returns statistical overview of the database grouped by platform, category, tier, and creator type."""
