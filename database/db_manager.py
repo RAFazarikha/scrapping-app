@@ -276,7 +276,8 @@ class DatabaseManager:
         if not data.get("estimated_rate_card"):
             rate_info = estimate_rate_card(data["platform"], subs, data["tier"])
             data["estimated_rate_card"] = rate_info["estimated_rate_range"]
-        data.setdefault("affiliate_links", "")
+        for k in ["emails", "phone_numbers", "instagram_handle", "tiktok_handle", "bio_links", "affiliate_links", "avatar_url"]:
+            data.setdefault(k, "")
         cat = data.get("category", "")
         if data.get("instagram_handle"):
             self.add_discovered_handle("instagram", data["instagram_handle"], cat, data["platform"])

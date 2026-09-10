@@ -17,6 +17,7 @@ from config import NICHES
 from scrapers.youtube_scraper import YouTubeScraper
 from scrapers.tiktok_scraper import TikTokScraper
 from scrapers.instagram_scraper import InstagramScraper
+from scrapers.maps_scraper import MapsScraper
 from exporters.export_data import export_to_excel, export_to_majapahit_laravel
 from database.db_manager import DatabaseManager
 
@@ -75,11 +76,13 @@ class ScraperApp(ctk.CTk):
         self.tabs.add("▶️ YouTube")
         self.tabs.add("🎵 TikTok")
         self.tabs.add("📸 Instagram")
+        self.tabs.add("📍 Google Maps")
 
         self._build_scraping_tab(self.tabs.tab("🚀 Scraping"))
         self._build_data_tab(self.tabs.tab("▶️ YouTube"), "youtube")
         self._build_data_tab(self.tabs.tab("🎵 TikTok"), "tiktok")
         self._build_data_tab(self.tabs.tab("📸 Instagram"), "instagram")
+        self._build_data_tab(self.tabs.tab("📍 Google Maps"), "google_maps")
 
     # ---------- Tab 1: Scraping ----------
     def _build_scraping_tab(self, tab):
@@ -89,14 +92,14 @@ class ScraperApp(ctk.CTk):
         self.title_label = ctk.CTkLabel(self.main_frame, text="🌟 Scraper Influencer & Afiliator 🌟", font=ctk.CTkFont(size=18, weight="bold"))
         self.title_label.pack(pady=(10, 15))
 
-        # Pilihan Platform
         self.platform_label = ctk.CTkLabel(self.main_frame, text="1. Pilih Platform Target:")
         self.platform_label.pack(anchor="w", padx=20)
         self.platform_var = ctk.StringVar(value="YouTube")
         self.platform_menu = ctk.CTkOptionMenu(
             self.main_frame,
-            values=["YouTube", "TikTok", "Instagram", "Semua Platform"],
-            variable=self.platform_var
+            values=["YouTube", "TikTok", "Instagram", "Google Maps", "Semua Platform"],
+            variable=self.platform_var,
+            command=self.on_platform_change
         )
         self.platform_menu.pack(fill="x", padx=20, pady=(0, 15))
 
@@ -107,6 +110,14 @@ class ScraperApp(ctk.CTk):
         self.category_container = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.category_container.pack(fill="x", padx=20, pady=(0, 15))
 
+        self._gmaps_keywords = [
+            "maklon", "jasa maklon", "perusahaan maklon", "pabrik maklon", "produsen maklon",
+            "manufaktur", "manufacturer", "contract manufacturing", "contract manufacturer",
+            "manufacturing company", "manufacturing partner", "jasa produksi", "jasa manufaktur",
+            "jasa pembuatan produk", "produksi custom", "produksi OEM", "OEM manufacturer",
+            "private label", "private label manufacturer", "white label", "custom manufacturing",
+            "custom product manufacturer", "production partner"
+        ]
         categories = list(NICHES.keys())
         categories.extend(["Semua Kategori", "Lainnya"])
 
@@ -120,6 +131,12 @@ class ScraperApp(ctk.CTk):
         self.category_menu.pack(fill="x")
 
         self.custom_category_entry = ctk.CTkEntry(self.category_container, placeholder_text="Ketik kategori kustom di sini...")
+
+        # Input Lokasi (Khusus Gmaps)
+        self.location_label = ctk.CTkLabel(self.main_frame, text="2b. Lokasi (Kabupaten/Kota, khusus Gmaps):")
+        self.location_label.pack(anchor="w", padx=20)
+        self.location_entry = ctk.CTkEntry(self.main_frame, placeholder_text="Jakarta")
+        self.location_entry.pack(fill="x", padx=20, pady=(0, 15))
 
         # Input Target Data
         self.target_label = ctk.CTkLabel(self.main_frame, text="3. Target jumlah data (Default: 100):")
@@ -154,6 +171,23 @@ class ScraperApp(ctk.CTk):
         # Redirect stdout/stderr ke TextBox
         sys.stdout = LogQueue(self.log_box)
         sys.stderr = sys.stdout
+
+    def on_platform_change(self, choice):
+        """Update category options based on selected platform."""
+        # Determine base categories based on platform
+        if choice == "Google Maps":
+            base_categories = self._gmaps_keywords
+        else:
+            # For YouTube, TikTok, Instagram, use NICHES
+            base_categories = list(NICHES.keys())
+        
+        # Update category menu
+        categories = base_categories + ["Semua Kategori", "Lainnya"]
+        self.category_menu.configure(values=categories)
+        # Reset selection to first item
+        self.category_var.set(categories[0])
+        # Hide custom category entry if visible
+        self.custom_category_entry.pack_forget()
 
     # ---------- Tab 2-4: Data per platform ----------
     def _build_data_tab(self, tab, platform):
@@ -296,20 +330,30 @@ class ScraperApp(ctk.CTk):
             if plat_choice == "YouTube": platforms = ["youtube"]
             elif plat_choice == "TikTok": platforms = ["tiktok"]
             elif plat_choice == "Instagram": platforms = ["instagram"]
-            else: platforms = ["youtube", "tiktok", "instagram"]
+            elif plat_choice == "Google Maps": platforms = ["google_maps"]
+            else: platforms = ["youtube", "tiktok", "instagram", "google_maps"]
 
             cat_choice = self.category_var.get()
-            if cat_choice == "Semua Kategori":
-                selected_categories = list(NICHES.keys())
-            elif cat_choice == "Lainnya":
-                custom_cat = self.custom_category_entry.get().strip()
-                if not custom_cat:
-                    print("❌ Kategori kustom tidak boleh kosong!")
-                    self.start_btn.configure(state="normal", text="🚀 Mulai Scraping")
-                    return
-                selected_categories = [custom_cat]
+            if plat_choice == "Google Maps":
+                if cat_choice == "Semua Kategori":
+                    selected_categories = self._gmaps_keywords if hasattr(self, "_gmaps_keywords") else ["maklon"]
+                elif cat_choice == "Lainnya":
+                    custom_cat = self.custom_category_entry.get().strip()
+                    selected_categories = [custom_cat] if custom_cat else ["maklon"]
+                else:
+                    selected_categories = [cat_choice]
             else:
-                selected_categories = [cat_choice]
+                if cat_choice == "Semua Kategori":
+                    selected_categories = list(NICHES.keys())
+                elif cat_choice == "Lainnya":
+                    custom_cat = self.custom_category_entry.get().strip()
+                    if not custom_cat:
+                        print("❌ Kategori kustom tidak boleh kosong!")
+                        self.start_btn.configure(state="normal", text="🚀 Mulai Scraping")
+                        return
+                    selected_categories = [custom_cat]
+                else:
+                    selected_categories = [cat_choice]
 
             target_val = self.target_entry.get().strip()
             target_count = int(target_val) if target_val.isdigit() and int(target_val) > 0 else 100
@@ -321,6 +365,7 @@ class ScraperApp(ctk.CTk):
             yt_scraper = YouTubeScraper()
             tt_scraper = TikTokScraper()
             ig_scraper = InstagramScraper()
+            maps_scraper = MapsScraper()
             exported_files = []
 
             # --- Looping Eksekusi ---
@@ -334,6 +379,10 @@ class ScraperApp(ctk.CTk):
                         tt_scraper.scrape_target_count(cat, target_count=target_count)
                     elif plat == "instagram":
                         ig_scraper.scrape_target_count(cat, target_count=target_count)
+                    elif plat == "google_maps":
+                        loc_val = getattr(self, "location_entry", None)
+                        location = loc_val.get().strip() if loc_val and loc_val.get().strip() else "Jakarta"
+                        maps_scraper.scrape_target_count(cat, target_count=target_count, location=location)
 
                     # Export to Excel
                     excel_path = export_to_excel(platform=plat, category=cat, min_followers=min_followers)
@@ -358,7 +407,7 @@ class ScraperApp(ctk.CTk):
 
         finally:
             # Refresh tabel data & kembalikan tombol
-            for plat in ["youtube", "tiktok", "instagram"]:
+            for plat in ["youtube", "tiktok", "instagram", "google_maps"]:
                 self.after(0, self.refresh_table, plat)
             self.start_btn.configure(state="normal", text="🚀 Mulai Scraping")
 
