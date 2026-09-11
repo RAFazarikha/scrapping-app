@@ -22,11 +22,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install customtkinter pandas openpyxl requests tqdm pyinstaller
+          pip install customtkinter pandas openpyxl requests tqdm pyinstaller playwright beautifulsoup4
+
+      - name: Install Playwright Browsers
+        run: |
+          $env:PLAYWRIGHT_BROWSERS_PATH="0"
+          playwright install chromium
+        shell: pwsh
 
       - name: Build EXE with PyInstaller
         run: |
-          pyinstaller --noconfirm --onefile --noconsole --collect-all customtkinter --collect-all ttk --hidden-import customtkinter --hidden-import ttk main.py
+          $env:PLAYWRIGHT_BROWSERS_PATH="0"
+          pyinstaller --noconfirm --onefile --noconsole --collect-all customtkinter --collect-all ttk --collect-all playwright --hidden-import customtkinter --hidden-import ttk main.py
+        shell: pwsh
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4

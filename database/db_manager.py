@@ -47,6 +47,9 @@ class DatabaseManager:
                     category TEXT,
                     search_keyword TEXT,
                     country TEXT DEFAULT 'ID',
+                    address TEXT,
+                    lat REAL DEFAULT 0.0,
+                    lon REAL DEFAULT 0.0,
                     description TEXT,
                     emails TEXT,
                     phone_numbers TEXT,
@@ -90,6 +93,12 @@ class DatabaseManager:
                 cursor.execute("ALTER TABLE influencers ADD COLUMN city TEXT DEFAULT 'Indonesia';")
             if "estimated_rate_card" not in columns:
                 cursor.execute("ALTER TABLE influencers ADD COLUMN estimated_rate_card TEXT;")
+            if "address" not in columns:
+                cursor.execute("ALTER TABLE influencers ADD COLUMN address TEXT;")
+            if "lat" not in columns:
+                cursor.execute("ALTER TABLE influencers ADD COLUMN lat REAL DEFAULT 0.0;")
+            if "lon" not in columns:
+                cursor.execute("ALTER TABLE influencers ADD COLUMN lon REAL DEFAULT 0.0;")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_platform ON influencers(platform);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_category ON influencers(category);")
@@ -276,8 +285,28 @@ class DatabaseManager:
         if not data.get("estimated_rate_card"):
             rate_info = estimate_rate_card(data["platform"], subs, data["tier"])
             data["estimated_rate_card"] = rate_info["estimated_rate_range"]
-        for k in ["emails", "phone_numbers", "instagram_handle", "tiktok_handle", "bio_links", "affiliate_links", "avatar_url"]:
+        for k in ["emails", "phone_numbers", "instagram_handle", "tiktok_handle", "bio_links", "affiliate_links", "avatar_url", "address"]:
             data.setdefault(k, "")
+        data.setdefault("lat", 0.0)
+        data.setdefault("lon", 0.0)
+        # Berikan nilai default untuk metrik numerik dan string yang kosong
+        data.setdefault("subscribers", 0)
+        data.setdefault("subscribers_formatted", "0")
+        data.setdefault("total_videos", 0)
+        data.setdefault("total_views", 0)
+        data.setdefault("avg_recent_views", 0)
+        data.setdefault("avg_recent_likes", 0)
+        data.setdefault("avg_recent_comments", 0)
+        data.setdefault("engagement_rate", 0.0)
+
+        # Berikan nilai default untuk metadata channel agar tidak error
+        data.setdefault("handle", data.get("name", "unknown"))
+        data.setdefault("channel_title", data.get("name", "Unknown"))
+        data.setdefault("custom_url", data.get("website", ""))
+        data.setdefault("category", data.get("search_keyword", ""))
+        data.setdefault("search_keyword", "")
+        data.setdefault("country", "ID")
+        data.setdefault("description", data.get("address", ""))
         cat = data.get("category", "")
         if data.get("instagram_handle"):
             self.add_discovered_handle("instagram", data["instagram_handle"], cat, data["platform"])
@@ -291,6 +320,7 @@ class DatabaseManager:
                 subscribers_formatted, total_videos, total_views,
                 avg_recent_views, avg_recent_likes, avg_recent_comments,
                 engagement_rate, category, search_keyword, country,
+                address, lat, lon,
                 description, emails, phone_numbers, instagram_handle,
                 tiktok_handle, bio_links, affiliate_links, avatar_url, created_at, updated_at
             ) VALUES (
@@ -299,6 +329,7 @@ class DatabaseManager:
                 :subscribers_formatted, :total_videos, :total_views,
                 :avg_recent_views, :avg_recent_likes, :avg_recent_comments,
                 :engagement_rate, :category, :search_keyword, :country,
+                :address, :lat, :lon,
                 :description, :emails, :phone_numbers, :instagram_handle,
                 :tiktok_handle, :bio_links, :affiliate_links, :avatar_url,
                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
@@ -320,8 +351,12 @@ class DatabaseManager:
                 avg_recent_comments = CASE WHEN :avg_recent_comments > 0 THEN :avg_recent_comments ELSE avg_recent_comments END,
                 engagement_rate = CASE WHEN :engagement_rate > 0.0 THEN :engagement_rate ELSE engagement_rate END,
                 category = CASE WHEN :category != '' THEN :category ELSE category END,
+                address = COALESCE(:address, address),
+                lat = CASE WHEN :lat != 0.0 THEN :lat ELSE lat END,
+                lon = CASE WHEN :lon != 0.0 THEN :lon ELSE lon END,
                 emails = CASE WHEN :emails != '' THEN :emails ELSE emails END,
                 phone_numbers = CASE WHEN :phone_numbers != '' THEN :phone_numbers ELSE phone_numbers END,
+                website = COALESCE(:custom_url, website),
                 instagram_handle = CASE WHEN :instagram_handle != '' THEN :instagram_handle ELSE instagram_handle END,
                 tiktok_handle = CASE WHEN :tiktok_handle != '' THEN :tiktok_handle ELSE tiktok_handle END,
                 bio_links = CASE WHEN :bio_links != '' THEN :bio_links ELSE bio_links END,

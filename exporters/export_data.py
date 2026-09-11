@@ -56,6 +56,7 @@ def export_to_excel(
 ) -> str:
     """
     Exports influencers & afiliators to Excel (.xlsx) file with standard name: <Platform>_<Kategori>_ddMMMyyyy.xlsx
+    For Google Maps platform, exports business location columns.
     """
     db = DatabaseManager()
     data = db.get_all_influencers(
@@ -72,40 +73,64 @@ def export_to_excel(
 
     df = pd.DataFrame(data)
 
-    priority_cols = [
-        "platform", "creator_type", "tier", "channel_title", "handle", "category",
-        "city", "estimated_rate_card", "subscribers", "subscribers_formatted",
-        "avg_recent_views", "engagement_rate", "emails", "phone_numbers",
-        "instagram_handle", "tiktok_handle", "custom_url", "bio_links",
-        "affiliate_links", "country"
-    ]
+    # Tentukan kolom prioritas berdasarkan platform
+    if platform == "google_maps":
+        priority_cols = [
+            "platform", "channel_title", "address", "lat", "lon",
+            "phone_numbers", "custom_url", "emails",
+            "category", "search_keyword", "city", "country", "description"
+        ]
+        column_mapping = {
+            "platform": "Platform",
+            "channel_title": "Nama Lokasi",
+            "address": "Alamat Lengkap",
+            "lat": "Latitude",
+            "lon": "Longitude",
+            "phone_numbers": "No. Telepon",
+            "custom_url": "Website",
+            "emails": "Email",
+            "category": "Kategori",
+            "search_keyword": "Kata Kunci Pencarian",
+            "city": "Kota",
+            "country": "Negara",
+            "description": "Deskripsi"
+        }
+    else:
+        priority_cols = [
+            "platform", "creator_type", "tier", "channel_title", "handle", "category",
+            "city", "estimated_rate_card", "subscribers", "subscribers_formatted",
+            "avg_recent_views", "engagement_rate", "emails", "phone_numbers",
+            "instagram_handle", "tiktok_handle", "custom_url", "bio_links",
+            "affiliate_links", "country"
+        ]
+        column_mapping = {
+            "platform": "Platform",
+            "creator_type": "Tipe Akun (Influencer / Afiliator)",
+            "tier": "Tier Influencer (PRD: Nano/Micro/Macro/Mega)",
+            "channel_title": "Nama Lengkap / Creator",
+            "handle": "Username / Handle",
+            "category": "Niche / Kategori",
+            "city": "Kota / Domisili",
+            "estimated_rate_card": "Estimasi Rate Card (Rp)",
+            "subscribers": "Followers / Subscribers",
+            "subscribers_formatted": "Followers (Teks)",
+            "avg_recent_views": "Rata-rata Views",
+            "engagement_rate": "Engagement Rate (%)",
+            "emails": "Email Bisnis / Endorsement",
+            "phone_numbers": "WhatsApp / CP Manager",
+            "instagram_handle": "Instagram",
+            "tiktok_handle": "TikTok",
+            "custom_url": "URL Profil",
+            "bio_links": "Linktree / Bio Links",
+            "affiliate_links": "Link Shopee / TikTok Affiliate",
+            "country": "Negara"
+        }
+    
     other_cols = [col for col in df.columns if col not in priority_cols]
     final_cols = [col for col in priority_cols if col in df.columns] + other_cols
     df = df[final_cols]
 
     # Clean header mapping aligned with PRD
-    column_mapping = {
-        "platform": "Platform",
-        "creator_type": "Tipe Akun (Influencer / Afiliator)",
-        "tier": "Tier Influencer (PRD: Nano/Micro/Macro/Mega)",
-        "channel_title": "Nama Lengkap / Creator",
-        "handle": "Username / Handle",
-        "category": "Niche / Kategori",
-        "city": "Kota / Domisili",
-        "estimated_rate_card": "Estimasi Rate Card (Rp)",
-        "subscribers": "Followers / Subscribers",
-        "subscribers_formatted": "Followers (Teks)",
-        "avg_recent_views": "Rata-rata Views",
-        "engagement_rate": "Engagement Rate (%)",
-        "emails": "Email Bisnis / Endorsement",
-        "phone_numbers": "WhatsApp / CP Manager",
-        "instagram_handle": "Instagram",
-        "tiktok_handle": "TikTok",
-        "custom_url": "URL Profil",
-        "bio_links": "Linktree / Bio Links",
-        "affiliate_links": "Link Shopee / TikTok Affiliate",
-        "country": "Negara"
-    }
     df = df.rename(columns=column_mapping)
 
     if not filename:
